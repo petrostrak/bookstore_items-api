@@ -1,40 +1,107 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
+	"strings"
 
-	"github.com/bookstore_items-api/domain/items"
-	"github.com/bookstore_items-api/services"
+	"github.com/bookstore_items-api/src/domain/items"
+	"github.com/bookstore_items-api/src/domain/queries"
+	"github.com/bookstore_items-api/src/services"
+	"github.com/bookstore_items-api/src/utils/http_utils"
+	"github.com/bookstore_oauth-go/oauth"
+	"github.com/bookstore_utils-go/rest_errors"
+	"github.com/gorilla/mux"
 )
 
-var ItemsController itemsControllerInterface = &itemsController{}
+var (
+	ItemsController itemsControllerInterface = &itemsController{}
+)
 
 type itemsControllerInterface interface {
-	Create(http.ResponseWriter, *http.Request)
-	Get(http.ResponseWriter, *http.Request)
+	Create(w http.ResponseWriter, r *http.Request)
+	Get(w http.ResponseWriter, r *http.Request)
+	Search(w http.ResponseWriter, r *http.Request)
 }
 
-type itemsController struct{}
+type itemsController struct {
+}
 
-func (ic *itemsController) Create(w http.ResponseWriter, r *http.Request) {
+func (cont *itemsController) Create(w http.ResponseWriter, r *http.Request) {
 	if err := oauth.AuthenticateRequest(r); err != nil {
-		// TODO: Return error to the caller
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(err.Status())
+		if a := json.NewEncoder(w).Encode(err); a != nil {
+			fmt.Println("Error json: " + a.Error())
+		}
 		return
 	}
-	item := items.Item{
-		Seller: oauth.GetCallerId(r),
+	sellerId := oauth.GetCallerId(r)
+	if sellerId == 0 {
+		respErr := rest_errors.NewUnauthorizedError("invalid access token")
+		http_utils.RespondError(w, respErr)
+		return
 	}
 
-	result, err := services.ItemsService.Create(item)
+	requestBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		// TODO: Return json to the user
+		respErr := rest_errors.NewBadRequestError("invalid request body")
+		http_utils.RespondError(w, respErr)
+		return
+	}
+	defer r.Body.Close()
+
+	var itemRequest items.Item
+	if err := json.Unmarshal(requestBody, &itemRequest); err != nil {
+		respErr := rest_errors.NewBadRequestError("invalid item json body")
+		http_utils.RespondError(w, respErr)
+		return
 	}
 
-	fmt.Println(result)
-	// TODO: return created item as json with http.status 201
+	itemRequest.Seller = sellerId
+
+	result, createErr := services.ItemsService.Create(itemRequest)
+	if createErr != nil {
+		http_utils.RespondError(w, createErr)
+		return
+	}
+	http_utils.RespondJson(w, http.StatusCreated, result)
 }
 
-func (ic *itemsController) Get(w http.ResponseWriter, r *http.Request) {
+func (cont *itemsController) Get(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	itemId := strings.TrimSpace(vars["id"])
 
+	item, err := services.ItemsService.Get(itemId)
+	if err != nil {
+		http_utils.RespondError(w, err)
+		return
+	}
+	http_utils.RespondJson(w, http.StatusOK, item)
+}
+
+func (c *itemsController) Search(w http.ResponseWriter, r *http.Request) {
+	bytes, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		apiErr := rest_errors.NewBadRequestError("invalid json body")
+		http_utils.RespondError(w, apiErr)
+		return
+	}
+	defer r.Body.Close()
+
+	var query queries.EsQuery
+	if err := json.Unmarshal(bytes, &query); err != nil {
+		apiErr := rest_errors.NewBadRequestError("invalid json body")
+		http_utils.RespondError(w, apiErr)
+		return
+	}
+
+	items, searchErr := services.ItemsService.Search(query)
+	if searchErr != nil {
+		http_utils.RespondError(w, searchErr)
+		return
+	}
+	http_utils.RespondJson(w, http.StatusOK, items)
 }

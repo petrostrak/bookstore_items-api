@@ -1,10 +1,9 @@
 package services
 
 import (
-	"net/http"
-
-	"github.com/bookstore_items-api/domain/items"
-	"github.com/bookstore_items-api/utils/errors"
+	"github.com/bookstore_items-api/src/domain/items"
+	"github.com/bookstore_items-api/src/domain/queries"
+	"github.com/bookstore_utils-go/rest_errors"
 )
 
 var (
@@ -12,16 +11,30 @@ var (
 )
 
 type itemsServiceInterface interface {
-	Create(items.Item) (*items.Item, errors.RestErr)
-	Get(string) (*items.Item, errors.RestErr)
+	Create(items.Item) (*items.Item, rest_errors.RestErr)
+	Get(string) (*items.Item, rest_errors.RestErr)
+	Search(queries.EsQuery) ([]items.Item, rest_errors.RestErr)
 }
 
 type itemsService struct{}
 
-func (is *itemsService) Create(item items.Item) (*items.Item, errors.RestErr) {
-	return nil, errors.NewRestError("TODO: imple", http.StatusNotImplemented, "not implemented", nil)
+func (s *itemsService) Create(item items.Item) (*items.Item, rest_errors.RestErr) {
+	if err := item.Save(); err != nil {
+		return nil, err
+	}
+	return &item, nil
 }
 
-func (is *itemsService) Get(string) (*items.Item, errors.RestErr) {
-	return nil, errors.NewRestError("TODO: imple", http.StatusNotImplemented, "not implemented", nil)
+func (s *itemsService) Get(id string) (*items.Item, rest_errors.RestErr) {
+	item := items.Item{Id: id}
+
+	if err := item.Get(); err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func (s *itemsService) Search(query queries.EsQuery) ([]items.Item, rest_errors.RestErr) {
+	dao := items.Item{}
+	return dao.Search(query)
 }
